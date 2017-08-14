@@ -1,0 +1,141 @@
+#!/usr/bin/python3
+
+from urllib import request, parse
+import re
+import argparse
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
+from collections import OrderedDict
+
+classes = ["SL", "1A", "2A", "3A", "CC", "FC", "2S"];
+
+parser = argparse.ArgumentParser(description='Train seat crawler')
+parser.add_argument('--src', help='Source station code', required=True)
+parser.add_argument('--dest', help='Destination station code', required=True)
+parser.add_argument('--class', help='Class code', required=True, dest="class1")
+parser.add_argument('--date', type=lambda d: datetime.strptime(d, '%Y%m%d'), required=True)
+
+args = parser.parse_args()
+
+def get_train_list():
+    train_list_url = "http://www.indianrail.gov.in/cgi_bin/inet_srcdest_cgi_time_10354.cgi"
+    data = {
+        "lccp_src_stncode": args.src,
+        "lccp_dstn_stncode": args.dest,
+        "lccp_classopt": args.class1,
+        "lccp_day": args.date.day,
+        "lccp_month": args.date.month,
+        "lccp_dep_time": 0,
+        "lccp_depb_time": 24,
+        "lccp_ari_time": 0,
+        "lccp_arib_time": 24,
+        "lccp_trn_type": "Z",
+        "monitor": "ON",
+        "lccp_ret_day": 29,
+        "lccp_ret_month": 7,
+        "submit2": "Please Wait...",
+        "CurrentMonth": 4,
+        "CurrentDate": 19,
+        "CurrentYear": 2006
+    }
+    headers = {
+        "Referer": "http://www.indianrail.gov.in/between_Imp_Stations.html"
+    }
+    data = parse.urlencode(data).encode()
+    req = request.Request(train_list_url, headers=headers, data=data)
+    res = request.urlopen(req)
+    train_numbers = re.findall("farefill\('[^']*','(\d+)','[^']*',\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+\)", res.read().decode('ascii'))
+    return sorted(list(set(train_numbers)))
+
+def get_train_route(train_no):
+    train_route_url = "http://www.indianrail.gov.in/cgi_bin/inet_trnpath_cgi.cgi"
+    data = {
+        "lccp_trn_no": train_no,
+        "lccp_month": args.date.month,
+        "lccp_day": args.date.day,
+        "lccp_daycnt": 0
+    }
+    headers = {
+        "Referer": "http://www.indianrail.gov.in/cgi_bin/inet_srcdest_cgi_time_10354.cgi"
+    }
+    data = parse.urlencode(data).encode()
+    req = request.Request(train_route_url, headers=headers, data=data)
+    res = request.urlopen(req)
+    data = res.read()
+    soup = BeautifulSoup(data, 'html.parser')
+    table = soup.findAll(lambda tag: tag.name=="table", class_="table_border_both")[1]
+    rows = table.findAll(lambda tag: tag.name=="tr")
+    route_dict = OrderedDict()
+    for row in rows:
+        cells = row.findAll(lambda tag: tag.name=="td")
+        if len(cells) > 8:
+            route_dict[cells[1].contents[0].strip()] = int(cells[8].contents[0])
+    return route_dict
+
+def get_train_availability(train_no, src, dst, date):
+    train_availability_url = "http://www.indianrail.gov.in/cgi_bin/inet_accavl_cgi_10251.cgi"
+    data = {
+        "lccp_trnno": train_no,
+        "lccp_day": date.day,
+        "lccp_month": date.month,
+        "lccp_srccode": src,
+        "lccp_dstncode": dst,
+        "lccp_class1": args.class1,
+        "lccp_quota": "GN",
+        "submit": "Please Wait...",
+        "lccp_classopt":"ZZ",
+        "lccp_class2": "ZZ",
+        "lccp_class3": "ZZ",
+        "lccp_class4": "ZZ",
+        "lccp_class5": "ZZ",
+        "lccp_class6": "ZZ",
+        "lccp_class7": "ZZ",
+        "lccp_class6": "ZZ",
+        "lccp_class7": "ZZ"
+    }
+    headers = {
+        "Referer": "http://www.indianrail.gov.in/seat_Avail.html"
+    }
+    data = parse.urlencode(data).encode()
+    req = request.Request(train_availability_url, headers=headers, data=data)
+    res = request.urlopen(req)
+    data = res.read()
+    soup = BeautifulSoup(data, 'html.parser')
+    tables = soup.findAll(lambda tag: tag.name=='table', class_="table_border")
+    if len(tables) > 1:
+        table = tables[1]
+        rows = table.findAll(lambda tag: tag.name=='tr')
+        availability_dict = {}
+        for row in rows:
+            cells = row.findAll(lambda tag: tag.name=="td")
+            if len(cells) > 2:
+                availability_dict[cells[1].contents[0].strip().replace(" ", "0")] = cells[2].contents[0]
+        #print(availability_dict)
+        return availability_dict[date.strftime("%d-%m-%Y")]
+    else:
+        return "NA"
+
+trains = get_train_list()
+if len(trains) == 0:
+    print("No trains available for selected class on selected date")
+else:
+    for train in trains:
+        route_dict = get_train_route(train)
+        if args.src in route_dict and args.dest in route_dict:
+            print(train+":")
+            day = route_dict[args.src]
+            route_list = list(route_dict.keys())
+            src_idx = route_list.index(args.src)
+            dest_idx = route_list.index(args.dest)
+            avail = get_train_availability(train, args.src, args.dest, args.date)
+            print(args.src, args.dest, avail)
+            for item in route_list[:src_idx]:
+                avail = get_train_availability(train, item, args.dest, args.date + timedelta(days=route_dict[item]-day))
+                print(item, args.dest, avail)
+            for item in route_list[(dest_idx+1):]:
+                avail = get_train_availability(train, args.src, item, args.date)
+                print(args.src, item, avail)
+
+        #print(route_dict)
+#availability = get_train_availability(trains[0], route[0][0], route[-1][0])
+#print(availability)
