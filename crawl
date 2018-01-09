@@ -6,6 +6,11 @@ import argparse
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from collections import OrderedDict
+import json
+import time
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import itertools
 
 classes = ["SL", "1A", "2A", "3A", "CC", "FC", "2S"];
 
@@ -13,129 +18,158 @@ parser = argparse.ArgumentParser(description='Train seat crawler')
 parser.add_argument('--src', help='Source station code', required=True)
 parser.add_argument('--dest', help='Destination station code', required=True)
 parser.add_argument('--class', help='Class code', required=True, dest="class1")
-parser.add_argument('--date', type=lambda d: datetime.strptime(d, '%Y%m%d'), required=True)
+parser.add_argument('--date', type=lambda d: datetime.strptime(d, '%d-%m-%Y'), required=True)
 
 args = parser.parse_args()
 
+def get_cookies(headers):
+    headers = str(headers).split("\n")
+    cookies = ""
+    for item in headers:
+        if item.startswith("Set-Cookie"):
+            cookies += item.split(" ")[1]
+    return cookies
+
+#req = request.Request("http://www.indianrail.gov.in/enquiry/TBIS/TrainBetweenImportantStations.jsp")
+#res = request.urlopen(req)
+#cookies = get_cookies(res.headers)
+#print(cookies)
+cookies=""
+answer=""
+
+req = request.Request("http://www.indianrail.gov.in/enquiry/FetchAutoComplete")
+res = request.urlopen(req)
+stations = json.loads(res.read().decode('ascii'))
+#print(stations)
+
+for item in stations:
+    if (item.endswith(" "+args.src)):
+        args.src_long = item
+    if (item.endswith(" "+args.dest)):
+        args.dest_long = item
+
+def show_captcha():
+    global cookies, answer
+    ts = int(time.time() * 1000)
+    req = request.Request("http://www.indianrail.gov.in/enquiry/captchaDraw.png?"+str(ts))
+    res = request.urlopen(req)
+    data = res.read()
+    cookies = get_cookies(res.headers)
+    fd = open("captcha.png", "wb")
+    fd.write(data)
+    fd.close()
+    img = mpimg.imread('captcha.png')
+    plt.imshow(img)
+    plt.show()
+    answer = input()
+
+show_captcha()
+
 def get_train_list():
-    train_list_url = "http://www.indianrail.gov.in/cgi_bin/inet_srcdest_cgi_time_10354.cgi"
-    data = {
-        "lccp_src_stncode": args.src,
-        "lccp_dstn_stncode": args.dest,
-        "lccp_classopt": args.class1,
-        "lccp_day": args.date.day,
-        "lccp_month": args.date.month,
-        "lccp_dep_time": 0,
-        "lccp_depb_time": 24,
-        "lccp_ari_time": 0,
-        "lccp_arib_time": 24,
-        "lccp_trn_type": "Z",
-        "monitor": "ON",
-        "lccp_ret_day": 29,
-        "lccp_ret_month": 7,
-        "submit2": "Please Wait...",
-        "CurrentMonth": 4,
-        "CurrentDate": 19,
-        "CurrentYear": 2006
-    }
+    global cookies, answer
+    ts = int(time.time() * 1000)
     headers = {
-        "Referer": "http://www.indianrail.gov.in/between_Imp_Stations.html"
+        "Cookie": cookies
+    }
+    data = {
+        "inputCaptcha": answer,
+        "dt": args.date.strftime("%d-%m-%Y"),
+        "sourceStation": args.src_long,
+        "destinationStation": args.dest_long,
+        "flexiWithDate": "n",
+        "inputPage": "TBIS",
+        "language": "en",
+        "_": ts
     }
     data = parse.urlencode(data).encode()
-    req = request.Request(train_list_url, headers=headers, data=data)
+    req = request.Request("http://www.indianrail.gov.in/enquiry/CommonCaptcha?"+data.decode('ascii'), headers=headers)
     res = request.urlopen(req)
-    train_numbers = re.findall("farefill\('[^']*','(\d+)','[^']*',\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+,\d+\)", res.read().decode('ascii'))
-    return sorted(list(set(train_numbers)))
+    trains = json.loads(res.read().decode('ascii'))
+    nums = []
+    for item in trains['trainBtwnStnsList']:
+        if item['fromStnCode'] == args.src and item['toStnCode'] == args.dest:
+            nums.append([item['trainNumber'], item['trainType'], item['trainName']])
+    return nums
 
-def get_train_route(train_no):
-    train_route_url = "http://www.indianrail.gov.in/cgi_bin/inet_trnpath_cgi.cgi"
-    data = {
-        "lccp_trn_no": train_no,
-        "lccp_month": args.date.month,
-        "lccp_day": args.date.day,
-        "lccp_daycnt": 0
-    }
+def get_route(num):
+    global cookies, answer
+    ts = int(time.time() * 1000)
     headers = {
-        "Referer": "http://www.indianrail.gov.in/cgi_bin/inet_srcdest_cgi_time_10354.cgi"
+        "Cookie": cookies
+    }
+    data = {
+        "inputCaptcha": answer,
+        "inputPage": "TBIS_SCHEDULE_CALL",
+        "trainNo": num,
+        "journeyDate": args.date.strftime("%d-%m-%Y"),
+        "sourceStation": args.src_long,
+        "language": "en",
+        "_": ts
     }
     data = parse.urlencode(data).encode()
-    req = request.Request(train_route_url, headers=headers, data=data)
+    req = request.Request("http://www.indianrail.gov.in/enquiry/CommonCaptcha?"+data.decode('ascii'), headers=headers)
     res = request.urlopen(req)
-    data = res.read()
-    soup = BeautifulSoup(data, 'html.parser')
-    table = soup.findAll(lambda tag: tag.name=="table", class_="table_border_both")[1]
-    rows = table.findAll(lambda tag: tag.name=="tr")
-    route_dict = OrderedDict()
-    for row in rows:
-        cells = row.findAll(lambda tag: tag.name=="td")
-        if len(cells) > 8:
-            route_dict[cells[1].contents[0].strip()] = int(cells[8].contents[0])
-    return route_dict
+    route = json.loads(res.read().decode('ascii'))
+    stations = []
+    for item in route['stationList']:
+        stations.append([item['stationCode'], item['dayCount']])
+    day = 1
+    for item in stations:
+        if item[0] == args.src:
+            day = int(item[1])
+    for item in stations:
+        item[1] = int(item[1]) - day
+    return stations
 
-def get_train_availability(train_no, src, dst, date):
-    train_availability_url = "http://www.indianrail.gov.in/cgi_bin/inet_accavl_cgi_10251.cgi"
-    data = {
-        "lccp_trnno": train_no,
-        "lccp_day": date.day,
-        "lccp_month": date.month,
-        "lccp_srccode": src,
-        "lccp_dstncode": dst,
-        "lccp_class1": args.class1,
-        "lccp_quota": "GN",
-        "submit": "Please Wait...",
-        "lccp_classopt":"ZZ",
-        "lccp_class2": "ZZ",
-        "lccp_class3": "ZZ",
-        "lccp_class4": "ZZ",
-        "lccp_class5": "ZZ",
-        "lccp_class6": "ZZ",
-        "lccp_class7": "ZZ",
-        "lccp_class6": "ZZ",
-        "lccp_class7": "ZZ"
-    }
+def get_availability(num, src, dest, date):
+    global cookies, answer
+    ts = int(time.time() * 1000)
     headers = {
-        "Referer": "http://www.indianrail.gov.in/seat_Avail.html"
+        "Cookie": cookies
+    }
+    data = {
+        "inputCaptcha": answer,
+        "inputPage": "TBIS_CALL_FOR_FARE",
+        "trainNo": num[0],
+        "dt": date.strftime("%d-%m-%Y"),
+        "sourceStation": src,
+        "destinationStation": dest,
+        "classc": args.class1,
+        "quota": "GN",
+        "traintype": num[1][0],
+        "language": "en",
+        "_": ts
     }
     data = parse.urlencode(data).encode()
-    req = request.Request(train_availability_url, headers=headers, data=data)
+    req = request.Request("http://www.indianrail.gov.in/enquiry/CommonCaptcha?"+data.decode('ascii'), headers=headers)
     res = request.urlopen(req)
-    data = res.read()
-    soup = BeautifulSoup(data, 'html.parser')
-    tables = soup.findAll(lambda tag: tag.name=='table', class_="table_border")
-    if len(tables) > 1:
-        table = tables[1]
-        rows = table.findAll(lambda tag: tag.name=='tr')
-        availability_dict = {}
-        for row in rows:
-            cells = row.findAll(lambda tag: tag.name=="td")
-            if len(cells) > 2:
-                availability_dict[cells[1].contents[0].strip().replace(" ", "0")] = cells[2].contents[0]
-        #print(availability_dict)
-        return availability_dict[date.strftime("%d-%m-%Y")]
-    else:
-        return "NA"
+    d = res.read()
+    avail = json.loads(d.decode('utf8'))
+    try:
+        return avail['avlDayList'][0]['availablityStatus'], avail['totalCollectibleAmount']
+    except:
+        return "Error"
 
-trains = get_train_list()
-if len(trains) == 0:
-    print("No trains available for selected class on selected date")
-else:
-    for train in trains:
-        route_dict = get_train_route(train)
-        if args.src in route_dict and args.dest in route_dict:
-            print(train+":")
-            day = route_dict[args.src]
-            route_list = list(route_dict.keys())
-            src_idx = route_list.index(args.src)
-            dest_idx = route_list.index(args.dest)
-            avail = get_train_availability(train, args.src, args.dest, args.date)
-            print(args.src, args.dest, avail)
-            for item in route_list[:src_idx]:
-                avail = get_train_availability(train, item, args.dest, args.date + timedelta(days=route_dict[item]-day))
-                print(item, args.dest, avail)
-            for item in route_list[(dest_idx+1):]:
-                avail = get_train_availability(train, args.src, item, args.date)
-                print(args.src, item, avail)
+numbers = get_train_list()
 
-        #print(route_dict)
-#availability = get_train_availability(trains[0], route[0][0], route[-1][0])
-#print(availability)
+for number in numbers:
+    print("\n" + str(number))
+    route = get_route(number[0])
+    i = 0
+    src_idx = -1
+    dest_idx = -1
+    while i < len(route):
+        if route[i][0] == args.src:
+            src_idx = i
+        if route[i][0] == args.dest:
+            dest_idx = i
+        i += 1
+    if src_idx == -1 or dest_idx == -1:
+        print("Source or dest not found")
+        continue
+    com = list(itertools.combinations(range(len(route)), 2))
+    for item in com:
+        if (item[0] <= src_idx and item[1] >= dest_idx):
+            avail = get_availability(number, route[item[0]][0], route[item[1]][0], args.date + timedelta(days=route[item[0]][1]))
+            print(route[item[0]][0], route[item[1]][0], avail)
+

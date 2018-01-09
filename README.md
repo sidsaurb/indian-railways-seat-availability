@@ -2,7 +2,7 @@
 
 Usage:
 
-```python3 crawl --src=<src station code> --dest=<dest station code> --class=<SL|1A|2A|3A|CC|FC|2S> --date=<date of travel in %Y%m%d>```
+```python3 crawl --src=<src station code> --dest=<dest station code> --class=<SL|1A|2A|3A|CC|FC|2S> --date=<date of travel in %d-%m-%Y>```
 
 This script helps you get confirmed seats on indian trains if you can't finding direct tickets from station A to station B on irctc.
 It does the following things:
