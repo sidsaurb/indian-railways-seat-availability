@@ -88,7 +88,7 @@ def get_train_list():
     nums = []
     for item in trains['trainBtwnStnsList']:
         if item['fromStnCode'] == args.src and item['toStnCode'] == args.dest:
-            nums.append([item['trainNumber'], item['trainType'], item['trainName']])
+            nums.append([item['trainNumber'], item['trainType'], item['trainName'], item['departureTime'], item['duration'], item['arrivalTime']])
     return nums
 
 def get_route(num):
@@ -152,8 +152,11 @@ def get_availability(num, src, dest, date):
 
 numbers = get_train_list()
 
-for number in numbers:
+
+for number in sorted(numbers, key=lambda x: x[3]):
     print("\n" + str(number))
+    if number[0] == "13008" or number[0] == "13007":
+        continue
     route = get_route(number[0])
     i = 0
     src_idx = -1
