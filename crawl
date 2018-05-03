@@ -19,6 +19,8 @@ parser.add_argument('--src', help='Source station code', required=True)
 parser.add_argument('--dest', help='Destination station code', required=True)
 parser.add_argument('--class', help='Class code', required=True, dest="class1")
 parser.add_argument('--date', type=lambda d: datetime.strptime(d, '%d-%m-%Y'), required=True)
+parser.add_argument('--filter', nargs='+', help='List of trains to consider', required=False)
+parser.add_argument('--reverse', help='Reverse the order of train', required=False, action='store_true')
 
 args = parser.parse_args()
 
@@ -150,13 +152,16 @@ def get_availability(num, src, dest, date):
     except:
         return "Error"
 
-numbers = get_train_list()
+numbers = sorted(get_train_list(), key=lambda x: x[3])
+if args.reverse:
+    numbers.reverse()
 
-
-for number in sorted(numbers, key=lambda x: x[3]):
-    print("\n" + str(number))
-    if number[0] == "13008" or number[0] == "13007":
+for number in numbers:
+    if args.filter and number[0] not in args.filter:
         continue
+    if number[0] == "13008" or number[0] == "13007" or number[0] == "19023" or number[0] == "12925":
+        continue
+    print("\n" + str(number))
     route = get_route(number[0])
     i = 0
     src_idx = -1
