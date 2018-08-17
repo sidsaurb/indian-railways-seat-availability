@@ -11,6 +11,8 @@ import time
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import itertools
+from PIL import Image
+import pytesseract
 
 classes = ["SL", "1A", "2A", "3A", "CC", "FC", "2S"];
 
@@ -60,10 +62,17 @@ def show_captcha():
     fd = open("captcha.png", "wb")
     fd.write(data)
     fd.close()
-    img = mpimg.imread('captcha.png')
-    plt.imshow(img)
-    plt.show()
-    answer = input()
+    text = pytesseract.image_to_string(Image.open('captcha.png'))
+    obj = re.search(r'^(\s*\d+\s*[-+]\s*\d+\s*)=.*$', text)
+    if obj:
+        eq = obj.group(1)
+        answer = eval(eq)
+        print(eq, ' ', answer)
+    else:
+        img = mpimg.imread('captcha.png')
+        plt.imshow(img)
+        plt.show()
+        answer = input()
 
 show_captcha()
 
